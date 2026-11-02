@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comic Strip Generator</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; background: #f4efe4; color: #222; }
+  h1 { margin: 0 0 4px; } p.sub { margin: 0 0 16px; color: #666; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; max-width: 800px; }
+  input, select { padding: 12px; font-size: 16px; border-radius: 8px; border: 2px solid #222; background: #fff; }
+  input { flex: 1; min-width: 220px; }
+  button { padding: 12px 18px; font-size: 16px; border: 2px solid #222; border-radius: 8px; background: #ffcc33; font-weight: 700; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  #title { font-size: 26px; font-weight: 800; margin: 8px 0 12px; }
+  .strip { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 800px; }
+  .panel { border: 4px solid #222; border-radius: 6px; min-height: 280px; position: relative; padding: 10px;
+           display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; box-shadow: 4px 4px 0 #222; }
+  .panel.playing { outline: 5px solid #ff4d4d; }
+  .caption { background: #fff9c4; border: 2px solid #222; padding: 4px 8px; font-size: 14px; align-self: flex-start; }
+  .caption:empty { display: none; }
+  .scene { font-size: 44px; text-align: center; letter-spacing: 6px; }
+  .row { display: flex; align-items: flex-end; gap: 10px; }
+  .who { font-size: 64px; line-height: 1; }
+  .bubble { position: relative; background: #fff; border: 3px solid #222; border-radius: 16px; padding: 10px 12px;
+            font-size: 17px; line-height: 1.3; cursor: pointer; flex: 1; }
+  .bubble::before { content: ""; position: absolute; left: -14px; bottom: 14px; border: 8px solid transparent; border-right: 14px solid #222; }
+  .bubble:hover { background: #eef; }
+  .bg-day { background: linear-gradient(#8fd3ff, #e8f7ff); }
+  .bg-night { background: linear-gradient(#1a1f4d, #4a3f7a); }
+  .bg-sunset { background: linear-gradient(#ff8a5c, #ffd27a); }
+  .bg-indoor { background: linear-gradient(#f3d9b1, #e8c48f); }
+  .bg-rain { background: linear-gradient(#6c7a89, #b0bec5); }
+  .bg-forest { background: linear-gradient(#a8e6a1, #4f9d5a); }
+  #status { margin: 12px 0; color: #666; min-height: 1.2em; }
+  @media (max-width: 600px) { .strip { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>Comic Strip Generator</h1>
+<p class="sub">Give a plot idea. Get a 4-panel comic in an Indian language. Tap a speech bubble to hear it.</p>
+<div class="bar">
+  <input id="idea" value="A crow who is afraid of the monsoon rain">
+  <select id="lang">
+    <option value="hi-IN|Hindi">Hindi</option><option value="mr-IN|Marathi">Marathi</option>
+    <option value="ta-IN|Tamil">Tamil</option><option value="te-IN|Telugu">Telugu</option>
+    <option value="bn-IN|Bengali">Bengali</option><option value="gu-IN|Gujarati">Gujarati</option>
+    <option value="kn-IN|Kannada">Kannada</option><option value="ml-IN|Malayalam">Malayalam</option>
+    <option value="pa-IN|Punjabi">Punjabi</option><option value="od-IN|Odia">Odia</option>
+  </select>
+  <button id="mic">🎤 Speak idea</button>
+  <button id="go">Make comic</button>
+  <button id="all" disabled>Play all</button>
+</div>
+<div class="bar">
+  <span style="align-self:center">Translate this comic to:</span>
+  <select id="tlang">
+    <option value="en-IN|English">English</option><option value="hi-IN|Hindi">Hindi</option>
+    <option value="mr-IN|Marathi">Marathi</option><option value="ta-IN|Tamil">Tamil</option>
+    <option value="te-IN|Telugu">Telugu</option><option value="bn-IN|Bengali">Bengali</option>
+    <option value="gu-IN|Gujarati">Gujarati</option><option value="kn-IN|Kannada">Kannada</option>
+    <option value="ml-IN|Malayalam">Malayalam</option><option value="pa-IN|Punjabi">Punjabi</option>
+    <option value="od-IN|Odia">Odia</option>
+  </select>
+  <button id="tr" disabled>Translate</button>
+</div>
+<div id="title"></div>
+<div id="status"></div>
+<div class="strip" id="strip"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let panels = [], lang = "hi-IN", els = [];
+
+$("go").onclick = async () => {
+  const [code, name] = $("lang").value.split("|");
+  lang = code;
+  $("go").disabled = true; $("all").disabled = true;
+  $("status").textContent = "Writing your comic...";
+  $("strip").innerHTML = ""; $("title").textContent = "";
+  try {
+    const r = await fetch("/api/comic", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ idea: $("idea").value, language: name })
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    render(data);
+    $("status").textContent = "";
+    $("all").disabled = false;
+    $("tr").disabled = false;
+  } catch (e) {
+    $("status").textContent = "Oops: " + e.message;
+  }
+  $("go").disabled = false;
+};
+
+function render(data) {
+  $("title").textContent = data.title || "";
+  panels = data.panels || [];
+  els = panels.map(p => {
+    const d = document.createElement("div");
+    d.className = "panel bg-" + (p.bg || "day");
+    const cap = document.createElement("div"); cap.className = "caption"; cap.textContent = p.caption || "";
+    const scene = document.createElement("div"); scene.className = "scene"; scene.textContent = p.scene || "";
+    const row = document.createElement("div"); row.className = "row";
+    const who = document.createElement("div"); who.className = "who"; who.textContent = p.who || "🙂";
+    const b = document.createElement("div"); b.className = "bubble"; b.textContent = p.text || "";
+    row.append(who, b);
+    d.append(cap, scene, row);
+    b.onclick = () => speak(panels.indexOf(p));
+    $("strip").appendChild(d);
+    return d;
+  });
+}
+
+async function speak(i) {
+  const text = panels[i] && panels[i].text;
+  if (!text) return;
+  $("status").textContent = "Generating voice...";
+  try {
+    const r = await fetch("/api/speak", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ text, lang })
+    });
+    const { audio } = await r.json();
+    const a = new Audio("data:audio/wav;base64," + audio);
+    els[i].classList.add("playing");
+    $("status").textContent = "";
+    await new Promise(res => { a.onended = res; a.onerror = res; a.play().catch(res); });
+    els[i].classList.remove("playing");
+  } catch (e) {
+    $("status").textContent = "Could not play audio: " + e.message;
+  }
+}
+
+// --- Speak your idea (Sarvam speech-to-text) ---
+let rec, chunks = [];
+$("mic").onclick = async () => {
+  if (rec && rec.state === "recording") { rec.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    rec = new MediaRecorder(stream); chunks = [];
+    rec.ondataavailable = e => chunks.push(e.data);
+    rec.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      $("mic").textContent = "🎤 Speak idea";
+      $("status").textContent = "Transcribing...";
+      const ext = rec.mimeType.includes("mp4") ? "m4a" : "webm";
+      const fd = new FormData();
+      fd.append("audio", new Blob(chunks, { type: rec.mimeType }), "idea." + ext);
+      try {
+        const r = await fetch("/api/stt", { method: "POST", body: fd });
+        const d = await r.json();
+        if (d.text) { $("idea").value = d.text; $("status").textContent = "Got it! Press Make comic."; }
+        else throw new Error(d.error || "no text returned");
+      } catch (e) { $("status").textContent = "Could not transcribe: " + e.message; }
+    };
+    rec.start();
+    $("mic").textContent = "⏹ Stop";
+  } catch (e) { $("status").textContent = "Microphone not available: " + e.message; }
+};
+
+// --- Translate the finished comic (Sarvam translate) ---
+$("tr").onclick = async () => {
+  const [target] = $("tlang").value.split("|");
+  const texts = [$("title").textContent, ...panels.map(p => p.caption || ""), ...panels.map(p => p.text || "")];
+  $("tr").disabled = true; $("status").textContent = "Translating...";
+  try {
+    const r = await fetch("/api/translate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texts, source: lang, target })
+    });
+    const out = (await r.json()).texts;
+    const n = panels.length;
+    panels.forEach((p, i) => { p.caption = out[1 + i]; p.text = out[1 + n + i]; });
+    lang = target;
+    $("strip").innerHTML = "";
+    render({ title: out[0], panels });
+    $("status").textContent = "";
+  } catch (e) { $("status").textContent = "Translate failed: " + e.message; }
+  $("tr").disabled = false;
+};
+
+$("all").onclick = async () => {
+  $("all").disabled = true;
+  for (let i = 0; i < panels.length; i++) await speak(i);
+  $("all").disabled = false;
+};
+</script>
+</body>
+</html>
